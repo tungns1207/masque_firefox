@@ -1,5 +1,5 @@
 # ==========================================
-# Giai đoạn 1: Build usque (Giữ nguyên)
+# Stage 1: Build usque 
 # ==========================================
 FROM golang:1.24.1 AS builder-usque
 RUN apt-get update && apt-get install -y git
@@ -9,7 +9,7 @@ RUN go mod download
 RUN go build -o usque -ldflags="-s -w" .
 
 # ==========================================
-# Giai đoạn 2: Build masque-plus (Giữ nguyên)
+# Stage 2: Build masque-plus 
 # ==========================================
 FROM golang:1.24.1 AS builder-masque
 RUN apt-get update && apt-get install -y git
@@ -18,20 +18,22 @@ RUN git clone https://github.com/ircfspace/masque-plus.git .
 RUN go mod download
 RUN go build -o masque-plus .
 
+
 # ==========================================
-# Giai đoạn 3: Final Image (ĐÃ CẬP NHẬT GECKODRIVER 0.36.0)
+# Stage 3: Final Image (UPDATED GECKODRIVER 0.36.0)
 # ==========================================
 FROM accetto/ubuntu-vnc-xfce-firefox-g3:latest
 
-# Chuyển sang root để cài đặt phần mềm
+# Switch to root to install software
 USER root
 
-# 1. Cài đặt Python, PIP và các công cụ hỗ trợ
+# 1. Install Python, PIP, and utility tools
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     tcpdump \
     curl \
     iproute2 \
+    iptables \
     net-tools \
     vim \
     sudo \
@@ -41,42 +43,47 @@ RUN apt-get update && apt-get install -y \
     && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Cài đặt Selenium
+# 2. Install Selenium
 RUN pip3 install selenium --break-system-packages --ignore-installed
 
-# 3. Cài đặt undetected-geckodriver để bypass bot detection
+# 3. Install undetected-geckodriver to bypass bot detection
 COPY --chown=1001:0 undetected_geckodriver ./undetected_geckodriver
 RUN pip3 install -e ./undetected_geckodriver --break-system-packages
-# Đã sửa từ v0.34.0 -> v0.36.0 để tương thích Firefox mới nhất
+# Updated from v0.34.0 -> v0.36.0 for compatibility with the latest Firefox
 RUN wget https://github.com/mozilla/geckodriver/releases/download/v0.36.0/geckodriver-v0.36.0-linux64.tar.gz \
     && tar -xvzf geckodriver-v0.36.0-linux64.tar.gz \
     && chmod +x geckodriver \
     && mv geckodriver /usr/local/bin/ \
     && rm geckodriver-v0.36.0-linux64.tar.gz
 
-# 4. Cấu hình quyền Sudo
+# 4. Configure Sudo permissions
 RUN echo "headless ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
-# Setup thư mục làm việc
+# Setup working directory
 WORKDIR /home/headless/tools
 
-# 5. Copy file binary
+# 5. Copy binary files
 COPY --from=builder-usque --chown=1001:0  /app/usque ./usque
 COPY --from=builder-masque --chown=1001:0 /app/masque-plus ./masque-plus
 
-# 6. Copy Script Python
-COPY --chown=1001:0 youtube_loop_firefox.py ./youtube_loop_firefox.py
+COPY curl-linux-x86_64-musl-8.18.0/curl /usr/local/bin/curl
 
-# Cấp quyền thực thi
+# 6. Copy Python Scripts
+COPY --chown=1001:0 youtube_loop_firefox_with_proxy.py ./youtube_loop_firefox_with_proxy.py
+COPY --chown=1001:0 youtube_loop_firefox_without_proxy.py ./youtube_loop_firefox_without_proxy.py
+COPY --chown=1001:0 file_transfer_with_proxy.py ./file_transfer_with_proxy.py
+COPY --chown=1001:0 file_transfer_without_proxy.py ./file_transfer_without_proxy.py
+
+# Grant execution permissions
 RUN chmod +x ./usque ./masque-plus
 
-# Tạo shortcut Desktop
+# Create Desktop shortcut
 RUN mkdir -p /home/headless/Desktop && \
     echo "[Desktop Entry]\nVersion=1.0\nType=Application\nName=Traffic Tools\nExec=xfce4-terminal --working-directory=/home/headless/tools\nIcon=utilities-terminal\nTerminal=false\nStartupNotify=false" > /home/headless/Desktop/tools.desktop \
     && chmod +x /home/headless/Desktop/tools.desktop
 
-# Fix quyền sở hữu
+# Fix ownership permissions
 RUN chown -R 1001:0 /home/headless /dockerstartup
 
-# Quay về user mặc định
+# Switch back to default user
 USER 1001
